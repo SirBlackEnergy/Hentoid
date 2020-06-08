@@ -6,6 +6,7 @@ import android.webkit.URLUtil;
 import androidx.annotation.NonNull;
 
 import com.annimon.stream.Optional;
+import com.crashlytics.android.Crashlytics;
 
 import org.greenrobot.eventbus.EventBus;
 import org.greenrobot.eventbus.Subscribe;
@@ -22,6 +23,7 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import io.fabric.sdk.android.services.common.Crash;
 import me.devsaki.hentoid.HentoidApp;
 import me.devsaki.hentoid.database.domains.Content;
 import me.devsaki.hentoid.database.domains.ImageFile;
@@ -174,6 +176,8 @@ public class ExHentaiParser implements ImageListParser {
             String traceStr = trace.toString();
             if (traceStr.isEmpty()) traceStr = "no issue detected";
             Helper.copyPlainTextToClipboard(HentoidApp.getInstance().getApplicationContext(), traceStr);
+            Crashlytics.setString("exhentai",traceStr);
+            Crashlytics.logException(new RuntimeException("exhentai trace"));
         }
     }
 
