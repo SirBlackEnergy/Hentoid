@@ -22,6 +22,7 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import me.devsaki.hentoid.HentoidApp;
 import me.devsaki.hentoid.database.domains.Content;
 import me.devsaki.hentoid.database.domains.ImageFile;
 import me.devsaki.hentoid.enums.Site;
@@ -47,6 +48,8 @@ public class ExHentaiParser implements ImageListParser {
 
     public List<ImageFile> parseImageList(@NonNull Content content) throws Exception {
         EventBus.getDefault().register(this);
+
+        StringBuilder trace = new StringBuilder();
 
         try {
             List<ImageFile> result = new ArrayList<>();
@@ -148,7 +151,11 @@ public class ExHentaiParser implements ImageListParser {
                                     img.setDownloadParams(downloadParamsStr);
                                 }
                             }
+                        } else {
+                            trace.append("Image detection failed @").append(pageUrl).append(" - content=").append(Helper.encode64(doc.toString())).append("\n");
                         }
+                    } else {
+                        trace.append("Page failed : ").append(pageUrl).append("\n");
                     }
                     progress.advance();
                 }
@@ -164,6 +171,9 @@ public class ExHentaiParser implements ImageListParser {
             return result;
         } finally {
             EventBus.getDefault().unregister(this);
+            String traceStr = trace.toString();
+            if (traceStr.isEmpty()) traceStr = "no issue detected";
+            Helper.copyPlainTextToClipboard(HentoidApp.getInstance().getApplicationContext(), traceStr);
         }
     }
 
