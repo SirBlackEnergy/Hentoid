@@ -2,6 +2,8 @@ package me.devsaki.hentoid.fragments.preferences
 
 import android.content.DialogInterface
 import android.content.SharedPreferences
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.commit
@@ -97,6 +99,11 @@ class PreferenceFragment : PreferenceFragmentCompat(),
                     LibImportDialogFragment.invoke(parentFragmentManager)
                     true
                 }
+                Preferences.Key.PREF_VIEWER_RENDERING -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+                        ToastUtil.toast("Smooth rendering is not available on Android 5")
+                    true
+                }
                 Preferences.Key.PREF_SETTINGS_FOLDER -> {
                     if (ImportService.isRunning()) {
                         ToastUtil.toast("Import is already running")
@@ -136,7 +143,8 @@ class PreferenceFragment : PreferenceFragmentCompat(),
 
     private fun onFolderChanged() {
         val storageFolderPref: Preference? = findPreference(Preferences.Key.PREF_SETTINGS_FOLDER) as Preference?
-        storageFolderPref?.summary = Preferences.getStorageUri()
+        val uri = Uri.parse(Preferences.getStorageUri())
+        storageFolderPref?.summary = FileHelper.getFullPathFromTreeUri(requireContext(), uri, true)
     }
 
     private fun onPrefColorThemeChanged() {

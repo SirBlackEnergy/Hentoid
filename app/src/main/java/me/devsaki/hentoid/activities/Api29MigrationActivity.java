@@ -1,6 +1,8 @@
 package me.devsaki.hentoid.activities;
 
+import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.UriPermission;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -22,7 +24,9 @@ import me.devsaki.hentoid.events.ProcessEvent;
 import me.devsaki.hentoid.notification.import_.ImportNotificationChannel;
 import me.devsaki.hentoid.services.API29MigrationService;
 import me.devsaki.hentoid.util.FileHelper;
+import me.devsaki.hentoid.util.ImportHelper;
 import me.devsaki.hentoid.util.Preferences;
+import me.devsaki.hentoid.util.ToastUtil;
 import timber.log.Timber;
 
 public class Api29MigrationActivity extends AppCompatActivity {
@@ -47,6 +51,15 @@ public class Api29MigrationActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.activity_api29_migration);
+
+        String locationStr = Preferences.getStorageUri();
+        if (locationStr.isEmpty())
+            locationStr = Preferences.getSettingsFolder();
+        else
+            locationStr = FileHelper.getFullPathFromTreeUri(this, Uri.parse(locationStr), true);
+
+        TextView location = findViewById(R.id.api29_location_txt);
+        location.setText(getResources().getString(R.string.api29_migration_location, locationStr));
 
         // UI
         step1button = findViewById(R.id.import_step1_button);
@@ -77,7 +90,14 @@ public class Api29MigrationActivity extends AppCompatActivity {
         DocumentFile storageDoc = (storageUri.isEmpty()) ? null : DocumentFile.fromTreeUri(this, Uri.parse(storageUri));
 
         // If the root folder is already set to a content:// URI (previous use of SAF picker), start scanning at once
-        if (storageDoc != null && storageDoc.exists()) scanLibrary(storageDoc);
+        if (storageDoc != null && storageDoc.exists()) {
+            Timber.d("Detected dir : %s", storageDoc.getUri().toString());
+            // Make certain we have the actual Hentoid/.Hentoid folder (root URI can be set to its parent on certain devices)
+            storageDoc = ImportHelper.getExistingHentoidDirFrom(this, storageDoc);
+            Timber.d("Suggested dir : %s", storageDoc.getUri().toString());
+            Preferences.setStorageUri(storageDoc.getUri().toString());
+            scanLibrary(storageDoc);
+        }
         // else ask for the Hentoid folder, as PersistableUriPermission might not have been granted at all
         // (case of v11- app running on Android 10 with API28- target)
         else step1button.setVisibility(View.VISIBLE);
@@ -90,6 +110,7 @@ public class Api29MigrationActivity extends AppCompatActivity {
         }
         // http://stackoverflow.com/a/31334967/1615876
         intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+
         startActivityForResult(intent, RQST_STORAGE_PERMISSION);
     }
 
@@ -110,15 +131,44 @@ public class Api29MigrationActivity extends AppCompatActivity {
     // Return from SAF picker
     public void onSelectSAFRootFolder(@NonNull final Uri treeUri) {
 
-        // Release previous access permissions, if different than the new one
-        FileHelper.revokePreviousPermissions(getContentResolver(), treeUri);
+        boolean isUriPermissionPeristed = false;
+        ContentResolver contentResolver = getContentResolver();
+        String treeUriId = DocumentsContract.getTreeDocumentId(treeUri);
 
-        // Persist new access permission
-        getContentResolver().takePersistableUriPermission(treeUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        for (UriPermission p : contentResolver.getPersistedUriPermissions()) {
+            if (DocumentsContract.getTreeDocumentId(p.getUri()).equals(treeUriId)) {
+                isUriPermissionPeristed = true;
+                Timber.d("Uri permission already persisted for %s", treeUri);
+                break;
+            }
+        }
 
-        DocumentFile docFile = DocumentFile.fromTreeUri(this, treeUri);
-        if (docFile != null) scanLibrary(docFile);
+        if (!isUriPermissionPeristed) {
+            Timber.d("Persisting Uri permission for %s", treeUri);
+            // Release previous access permissions, if different than the new one
+            FileHelper.revokePreviousPermissions(contentResolver, treeUri);
+            // Persist new access permission
+            contentResolver.takePersistableUriPermission(treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }
+
+        DocumentFile selectedFolder = DocumentFile.fromTreeUri(this, treeUri);
+        if (selectedFolder != null) {
+            String folderName = selectedFolder.getName();
+            if (null == folderName) folderName = "";
+
+            // Make sure we detect the Hentoid folder if it's a child of the selected folder
+            if (!ImportHelper.isHentoidFolderName(folderName))
+                selectedFolder = ImportHelper.getExistingHentoidDirFrom(this, selectedFolder);
+        }
+
+        // If no existing hentoid folder is detected, tell the user to select it again
+        if (null == selectedFolder || null == selectedFolder.getName() || !ImportHelper.isHentoidFolderName(selectedFolder.getName()))
+        {
+            ToastUtil.toast("Please select an existing Hentoid folder. Its location is displayed on screen.");
+            return;
+        }
+        scanLibrary(selectedFolder);
     }
 
     private void scanLibrary(@NonNull final DocumentFile root) {
