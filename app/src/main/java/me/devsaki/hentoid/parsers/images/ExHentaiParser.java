@@ -23,8 +23,6 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import io.fabric.sdk.android.services.common.Crash;
-import me.devsaki.hentoid.HentoidApp;
 import me.devsaki.hentoid.database.domains.Content;
 import me.devsaki.hentoid.database.domains.ImageFile;
 import me.devsaki.hentoid.enums.Site;
@@ -52,16 +50,16 @@ public class ExHentaiParser implements ImageListParser {
         EventBus.getDefault().register(this);
 
         StringBuilder trace = new StringBuilder();
+        List<ImageFile> result = new ArrayList<>();
+
+        boolean useHentoidAgent = Site.EXHENTAI.canKnowHentoidAgent();
+        String downloadParamsStr = content.getDownloadParams();
+        if (null == downloadParamsStr || downloadParamsStr.isEmpty()) {
+            Timber.e("Download parameters not set");
+            return result;
+        }
 
         try {
-            List<ImageFile> result = new ArrayList<>();
-            boolean useHentoidAgent = Site.EXHENTAI.canKnowHentoidAgent();
-            String downloadParamsStr = content.getDownloadParams();
-            if (null == downloadParamsStr || downloadParamsStr.isEmpty()) {
-                Timber.e("Download parameters not set");
-                return result;
-            }
-
             Map<String, String> downloadParams;
             try {
                 downloadParams = JsonHelper.jsonToObject(downloadParamsStr, JsonHelper.MAP_STRINGS);
@@ -118,18 +116,22 @@ public class ExHentaiParser implements ImageListParser {
                 // 3- Open all pages and
                 //    - grab the URL of the displayed image
                 //    - grab the alternate URL of the "Click here if the image fails loading" link
-                result.add(ImageFile.newCover(content.getCoverImageUrl(), StatusContent.SAVED));
                 ImageFile img;
                 for (String pageUrl : pageUrls) {
-                    if (processHalted) break;
+                    if (processHalted) {
+                        trace.append("process halted").append("\n");
+                        break;
+                    }
                     doc = getOnlineDocument(pageUrl, headers, useHentoidAgent);
                     if (doc != null) {
                         // Displayed image
                         String imageUrl = getDisplayedImageUrl(doc).toLowerCase();
                         if (!imageUrl.isEmpty()) {
                             // If we have the 509.gif picture, it means the bandwidth limit for e-h has been reached
-                            if (imageUrl.contains("/509.gif"))
+                            if (imageUrl.contains("/509.gif")) {
+                                trace.append("limit reached").append("\n");
                                 throw new LimitReachedException("Bandwidth limit reached");
+                            }
                             img = ParseHelper.urlToImageFile(imageUrl, order++, pageUrls.size(), StatusContent.SAVED);
                             result.add(img);
 
@@ -162,23 +164,26 @@ public class ExHentaiParser implements ImageListParser {
                     progress.advance();
                 }
 
-                if (result.isEmpty() && doc != null)
+                if (!result.isEmpty())
+                    result.add(0, ImageFile.newCover(content.getCoverImageUrl(), StatusContent.SAVED));
+                else if (doc != null)
                     throw new EmptyResultException("urls:" + pageUrls.size() + ",page:" + Helper.encode64(doc.toString()));
             }
             progress.complete();
 
             // If the process has been halted manually, the result is incomplete and should not be returned as is
             if (processHalted) throw new PreparationInterruptedException();
-
-            return result;
         } finally {
             EventBus.getDefault().unregister(this);
             String traceStr = trace.toString();
             if (traceStr.isEmpty()) traceStr = "no issue detected";
-            Helper.copyPlainTextToClipboard(HentoidApp.getInstance().getApplicationContext(), traceStr);
-            Crashlytics.setString("exhentai",traceStr);
+
+            // Log trace to Firebase
+            Crashlytics.setString("exhentai", traceStr);
             Crashlytics.logException(new RuntimeException("exhentai trace"));
         }
+        //TODO do the same for e-h
+        return result;
     }
 
     @Nullable
@@ -191,14 +196,16 @@ public class ExHentaiParser implements ImageListParser {
             // If we have the 509.gif picture, it means the bandwidth limit for e-h has been reached
             if (imageUrl.contains("/509.gif"))
                 throw new LimitReachedException("Exhentai download points regenerate over time or can be bought on e-hentai if you're in a hurry");
-            if (!imageUrl.isEmpty()) return Optional.of(ParseHelper.urlToImageFile(imageUrl, order, maxPages, StatusContent.SAVED));
+            if (!imageUrl.isEmpty())
+                return Optional.of(ParseHelper.urlToImageFile(imageUrl, order, maxPages, StatusContent.SAVED));
         }
         return Optional.empty();
     }
 
     private void fetchPageUrls(@Nonnull Document doc, List<String> pageUrls) {
         Elements imageLinks = doc.select(".gdtm div a"); // Normal thumbs
-        if (null == imageLinks || imageLinks.isEmpty()) imageLinks = doc.select(".gdtl a"); // Large thumbs
+        if (null == imageLinks || imageLinks.isEmpty())
+            imageLinks = doc.select(".gdtl a"); // Large thumbs
         for (Element e : imageLinks) pageUrls.add(e.attr("href"));
     }
 
