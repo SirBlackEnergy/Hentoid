@@ -892,7 +892,7 @@ public class ContentDownloadService extends IntentService {
      * @throws IOException IOException if image cannot be saved at given location
      */
     private DocumentFile saveImage(@NonNull DocumentFile dir, @NonNull String fileName, @NonNull String mimeType, byte[] binaryContent) throws IOException {
-        DocumentFile file = FileHelper.findOrCreateDocumentFile(this, dir, mimeType, fileName);
+        DocumentFile file = FileHelper.findOrCreateDocumentFile(this, dir, "application/octet-stream", fileName);
         if (null == file)
             throw new IOException(String.format("Failed to create document %s under %s", fileName, dir.getUri().toString()));
         FileHelper.saveBinaryInFile(this, file, binaryContent);
